@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="theme-color" content="#0c1320"/>
+<title>FPS Performance Lab — Offline Trainer</title>
+<style>
+:root{color-scheme:dark;font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;--bg:#090e16;--panel:#151e2b;--line:#334054;--text:#e9f1fa;--soft:#9aacbf;--accent:#55dbc7;--warn:#ffba71}
+*{box-sizing:border-box}body{background:radial-gradient(circle at 5% -15%,#1b3643,transparent 45%),var(--bg);color:var(--text);margin:0;min-height:100vh}
+main{width:min(1120px,96vw);margin:0 auto;padding:24px 0 42px}.header{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}
+h1{font-size:clamp(1.6rem,3vw,2.4rem);margin:.2rem 0;letter-spacing:-.03em}h2{font-size:1.1rem;margin:0 0 9px}
+.eyebrow{letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-size:.69rem;font-weight:800}
+.sub{color:var(--soft);margin:3px 0}.panel{background:rgba(21,30,43,.94);border:1px solid var(--line);border-radius:16px;padding:16px}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button{font:inherit;font-weight:700;cursor:pointer;border-radius:10px;padding:10px 17px;border:1px solid var(--line);background:#243143;color:var(--text)}
+button.primary{background:var(--accent);color:#071617;border-color:transparent}
+button[disabled]{opacity:.5;cursor:default}button:hover:not([disabled]){filter:brightness(1.12)}
+.bar{display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center;margin:18px 0 12px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.stat{padding:14px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}.stat small{display:block;color:var(--soft);font-size:.73rem}.stat strong{display:block;font-size:1.5rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+#arena{height:min(55vh,505px);min-height:330px;position:relative;border-radius:16px;overflow:hidden;cursor:crosshair;touch-action:manipulation;user-select:none;isolation:isolate;background:linear-gradient(rgba(90,120,150,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(90,120,150,.07) 1px,transparent 1px),radial-gradient(circle,#142438,#0b1420);background-size:42px 42px,42px 42px,auto;border:1px solid #496072}
+#arena:before,#arena:after{content:"";pointer-events:none;position:absolute;background:rgba(108,193,189,.16)}#arena:before{width:1px;left:50%;height:100%}#arena:after{height:1px;top:50%;width:100%}
+#target{position:absolute;width:70px;height:70px;border:3px solid #e7fff8;box-shadow:0 0 0 8px rgba(85,219,199,.16),0 0 35px rgba(85,219,199,.48);background:radial-gradient(circle,#062f30 0 18%,#55dbc7 19% 35%,#0e746b 36% 100%);border-radius:50%;display:none;z-index:2;transform:translate(-50%,-50%);padding:0}
+#target:focus-visible{outline:4px solid #fff}#hud{position:absolute;top:12px;left:14px;font-size:.86rem;letter-spacing:.09em;font-weight:800;color:#9cd3d3}
+#instruction{position:absolute;bottom:22px;left:0;right:0;text-align:center;color:#c5d6e6;pointer-events:none;padding:0 16px}
+#event{font-weight:750;color:var(--accent)}#meta{display:flex;gap:20px;flex-wrap:wrap;color:var(--soft);font-size:.85rem}
+details{margin-top:16px;color:var(--soft)}summary{cursor:pointer;color:var(--text)}.footer{margin-top:15px;color:var(--soft);font-size:.84rem}code{color:#9cf2e6}
+@media(max-width:650px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:14px 0 30px}#arena{height:52vh;min-height:320px}}
+</style>
+</head>
+<body>
+<main>
+<div class="header">
+ <div><span class="eyebrow">Offline · Player-centered training</span><h1>FPS Performance Lab</h1>
+ <p class="sub">Aim acquisition • response timing • adaptive difficulty • exportable evidence</p></div>
+ <div class="actions"><button id="start" class="primary">Start 20 Targets</button>
+ <button id="stop" disabled>Stop</button><button id="export" disabled>Export JSON</button></div>
+</div>
+<div class="bar panel"><span id="event" role="status" aria-live="polite">Ready. Press Start to train.</span>
+<span id="meta"><span id="round">0 / 20 targets</span><span id="difficulty">Diameter 70 px</span></span></div>
+<div class="stats">
+ <div class="stat"><small>Completed hits</small><strong id="hits">0</strong></div>
+ <div class="stat"><small>Accuracy (attempts)</small><strong id="accuracy">—</strong></div>
+ <div class="stat"><small>Median acquisition time</small><strong id="median">—</strong></div>
+ <div class="stat"><small>Fitts-style throughput</small><strong id="throughput">—</strong></div>
+</div>
+<section id="arena" aria-label="Aiming training arena">
+  <div id="hud">TARGET ACQUISITION</div>
+  <button id="target" aria-label="Tap the practice target"></button>
+  <div id="instruction">The target appears after a short delay. Click it as quickly and accurately as you can.</div>
+</section>
+<div class="panel" id="advicePanel" aria-live="polite" style="margin-top:14px"><h2>Training feedback</h2><p id="advice">Complete a session to see a personalized training recommendation based on your own click performance.</p></div>
+<div class="panel" id="comparePanel" style="margin-top:14px"><h2>Compare two real sessions</h2>
+ <label for="referenceImport">Import an earlier FPS Lab JSON report (local only)</label>
+ <input id="referenceImport" type="file" accept=".json,application/json" style="display:block;margin:10px 0"/>
+ <p id="referenceStatus" role="status" aria-live="polite">No reference session loaded.</p>
+ <p id="comparison" aria-live="polite">Finish a training session, then import an earlier report to compare performance.</p>
+ </div>
+<div class="footer">Acquisition time includes both reaction and cursor movement. It is <strong>not</strong> an isolated neural reaction-time test. No eye-tracking, EMG, EEG, anti-cheat integration, or game API is claimed. All data stay on this device until you export.</div>
+<details><summary>How the difficulty and metrics work</summary><p>Each completed target records its delay from appearance until a successful click, target diameter, pointer position when the target appeared, and sampled movement path. Missed clicks and timed-out targets lower the five-trial adaptive accuracy. For mouse/pen users, the Fitts-style estimate uses pointer-to-target distance measured at target appearance (not the previous target location): sum of log2(distance/diameter + 1) divided by the sum of acquisition times. It mixes reaction and movement time, is not a standardized Fitts test, and is disabled for touch input. Old JSON exports used a different distance method, so their throughput is not directly compared. This is a prototype for WarriorHacks 2.0.</p></details>
+<style>
+#inhibitionLab{margin-top:16px}
+#inhibitionArena{height:295px;position:relative;border:1px solid #496072;border-radius:14px;overflow:hidden;background:radial-gradient(ellipse at center,#203448,#0c1725);user-select:none}
+#inhibitionTarget{position:absolute;display:none;transform:translate(-50%,-50%);width:82px;height:82px;border-radius:100px;color:#081520;font-weight:900;font-size:18px;border:4px solid #e6fff7;cursor:crosshair}
+#inhibitionTarget.go{background:#55dbc7}#inhibitionTarget.hold{background:#ffba71}
+#gngMsg{display:block;margin:10px 0;color:#c9dfeb;min-height:23px}
+#gngStats{display:flex;gap:14px;flex-wrap:wrap;color:#9aacbf;font-size:.86rem;padding:10px 0}
+</style>
+<section class="panel" id="inhibitionLab">
+ <h2>Reaction Control — GO / HOLD</h2>
+ <p class="sub">An optional response-inhibition drill. Press the GO circle; do not press anywhere in the drill arena during HOLD. GO clicks outside the circle count as off-target attempts. Response is recorded on pointer-down, not pointer release. Browser timings are not clinical measurements.</p>
+ <div class="actions">
+  <button id="gngStart" class="primary">Start 24 Cues</button>
+  <button id="gngPause" disabled>Pause</button>
+  <button id="gngExport" disabled>Export Drill JSON</button>
+  <button id="gngCsv" disabled>Export Drill CSV</button>
+ </div>
+ <div id="gngStats"><span id="gngRound">0 / 24 cues</span><span id="gngCorrect">Correct GO 0</span><span id="gngSuppress">Correct HOLD 0</span><span id="gngFaults">Errors 0</span><span id="gngOffTarget">Off-target GO 0</span><span id="gngMedian">Median GO acquisition —</span><span id="gngScore">Correct 0 / 24</span></div>
+ <div id="inhibitionArena" aria-label="GO HOLD response training area">
+  <button id="inhibitionTarget" aria-label="GO or HOLD cue"></button>
+ </div>
+ <span id="gngMsg" role="status">Start the drill when the 20-target training is idle.</span>
+ <p class="sub">Switching tabs pauses this drill; a disrupted cue is excluded rather than treated as a slow response. Only explicit Resume restarts it. Scores from automated demonstrations are not human performance.</p>
+</section>
+<script>
+(function(){
+"use strict";
+const el=id=>document.getElementById(id), arena=el("inhibitionArena"),cue=el("inhibitionTarget");
+const start=el("gngStart"),pause=el("gngPause"),out=el("gngExport"),csv=el("gngCsv");
+const oldStart=el("start"),oldStop=el("stop"),msg=el("gngMsg");
+let run=false,paused=false,idx=0,seq=[],seed=0,initialSeed=0,timeout=null,nextTimer=null,stamp=0,rows=[],current=null,interruptions=0;
+function median(values){if(!values.length)return null;const a=values.slice().sort((x,y)=>x-y),i=a.length>>1;return a.length%2?a[i]:(a[i-1]+a[i])/2;}
+function completedRows(){return rows.filter(r=>!r.interrupted);}
+function scoredSummary(){const r=completedRows(),go=r.filter(x=>x.cue==="GO"),hold=r.filter(x=>x.cue==="HOLD");return {scored_cues:r.length,go_hits:go.filter(x=>x.result==="hit").length,go_omissions:go.filter(x=>x.result==="omission").length,hold_correct:hold.filter(x=>x.result==="withheld").length,hold_false_alarms:hold.filter(x=>x.result==="false_alarm").length,go_off_target_clicks:go.reduce((n,x)=>n+(x.off_target_clicks||0),0),median_go_acquisition_ms:median(go.filter(x=>x.result==="hit").map(x=>x.elapsed_ms))};}
+function nextRandom(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;}
+function resetTimers(){clearTimeout(timeout);clearTimeout(nextTimer);timeout=nextTimer=null;}
+function lock(on){oldStart.disabled=on;}
+function status(){const q=scoredSummary(),n=q.go_hits+q.hold_correct;
+el("gngRound").textContent=idx+" / 24 cues";el("gngCorrect").textContent="Correct GO "+q.go_hits;
+el("gngSuppress").textContent="Correct HOLD "+q.hold_correct;
+el("gngFaults").textContent="Errors "+(q.hold_false_alarms+q.go_omissions);
+el("gngOffTarget").textContent="Off-target GO "+(q.go_off_target_clicks+(current&&current.kind==="GO"?current.offTarget:0));
+el("gngMedian").textContent="Median GO acquisition "+(q.median_go_acquisition_ms===null?"—":Math.round(q.median_go_acquisition_ms)+" ms");
+el("gngScore").textContent="Correct "+n+" / "+q.scored_cues;}
+function finalize(){run=false;paused=false;current=null;cue.style.display="none";resetTimers();lock(false);pause.disabled=true;pause.textContent="Pause";start.disabled=false;out.disabled=false;csv.disabled=false;
+const q=scoredSummary();msg.textContent="Drill completed: "+(q.go_hits+q.hold_correct)+"/24 correct; "+q.go_off_target_clicks+" off-target GO clicks; "+interruptions+" interruption(s).";status();}
+function record(result,responseRegion=null){if(!run||paused||!current)return;
+const item={index:idx+1,cue:current.kind,result,elapsed_ms:Math.max(0,Math.round(performance.now()-stamp)),off_target_clicks:current.offTarget,response_region:responseRegion,interrupted:false};
+rows.push(item);idx++;current=null;cue.style.display="none";resetTimers();status();
+if(idx>=seq.length){finalize();return;}
+nextTimer=setTimeout(show,350);}
+function show(){if(!run||paused)return;if(idx>=seq.length)return finalize();
+const kind=seq[idx];current={kind,offTarget:0};cue.textContent=kind;cue.className=kind==="GO"?"go":"hold";
+const w=arena.clientWidth,h=arena.clientHeight;
+cue.style.left=(45+nextRandom()*Math.max(1,w-90))+"px";cue.style.top=(45+nextRandom()*Math.max(1,h-90))+"px";
+cue.style.display="block";msg.textContent="Cue "+(idx+1)+"/24: "+(kind==="GO"?"click now":"do not click");stamp=performance.now();
+timeout=setTimeout(()=>record(kind==="GO"?"omission":"withheld"),1900);}
+function setPause(reason){if(!run||paused)return;paused=true;interruptions++;resetTimers();
+if(current){rows.push({index:idx+1,cue:current.kind,result:"interrupted",elapsed_ms:null,off_target_clicks:current.offTarget,response_region:null,interrupted:true});}
+current=null;cue.style.display="none";pause.textContent="Resume";msg.textContent=reason+" — paused. Resume to retry this cue.";status();}
+start.addEventListener("click",()=>{
+if(!oldStop.disabled){msg.textContent="Finish or stop the 20-target drill first.";return;}
+resetTimers();run=true;paused=false;idx=0;rows=[];current=null;interruptions=0;
+initialSeed=(((Date.now()>>>0)^((Math.random()*4294967295)>>>0))>>>0)||1;
+seed=initialSeed;
+seq=Array(18).fill("GO").concat(Array(6).fill("HOLD"));
+for(let i=seq.length-1;i>0;i--){const j=Math.floor(nextRandom()*(i+1));[seq[i],seq[j]]=[seq[j],seq[i]];}
+lock(true);start.disabled=true;pause.disabled=false;pause.textContent="Pause";out.disabled=true;csv.disabled=true;
+msg.textContent="Drill starting: 18 GO + 6 HOLD cues.";status();nextTimer=setTimeout(show,250);
+});
+pause.addEventListener("click",()=>{if(!run)return;if(paused){paused=false;pause.textContent="Pause";msg.textContent="Resumed";show();}else setPause("Manual pause");});
+cue.addEventListener("pointerdown",e=>{e.preventDefault();e.stopPropagation();if(!run||paused||!current)return;record(current.kind==="GO"?"hit":"false_alarm","cue");});
+arena.addEventListener("pointerdown",e=>{if(!run||paused||!current||e.target===cue)return;
+ if(current.kind==="HOLD"){record("false_alarm","arena");return;}
+ current.offTarget++;msg.textContent="GO: off-target click recorded. Acquire the circle before timeout.";status();});
+document.addEventListener("visibilitychange",()=>{if(document.hidden)setPause("Hidden tab");});
+window.addEventListener("blur",()=>setPause("Window unfocused"));
+function report(){return {kind:"FPS Performance Lab GO-HOLD drill",version:"private-pointerdown-v4",seed:initialSeed,prng_final_state:seed,
+random_generator:"LCG(1664525,1013904223,2^32)",cue_order:seq.slice(),planned_cues:seq.length,
+actual_go:seq.filter(s=>s==="GO").length,actual_hold:seq.filter(s=>s==="HOLD").length,
+interruptions,measurement:"Click GO circle; any pointer press within the arena on HOLD is a false alarm; outside GO clicks recorded separately. Timing includes acquisition, not neural reaction time.",
+summary:scoredSummary(),records:rows.slice(),automated_demo:null};}
+function dl(content,mime,name){const url=URL.createObjectURL(new Blob([content],{type:mime}));const a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),800);}
+out.addEventListener("click",()=>dl(JSON.stringify(report(),null,2),"application/json","go_hold_session.json"));
+csv.addEventListener("click",()=>{const lines=["index,cue,result,elapsed_ms,off_target_clicks,response_region,interrupted",...rows.map(r=>[r.index,r.cue,r.result,r.elapsed_ms??"",r.off_target_clicks??0,r.response_region??"",r.interrupted].join(","))];dl(lines.join("\r\n"),"text/csv","go_hold_session.csv");});
+})();
+</script>
+</main>
+<script>
+(()=>{
+"use strict";
+const byId=id=>document.getElementById(id);
+const arena=byId("arena"),target=byId("target");
+const els={hits:byId("hits"),accuracy:byId("accuracy"),median:byId("median"),throughput:byId("throughput"),
+ event:byId("event"),round:byId("round"),difficulty:byId("difficulty"),start:byId("start"),stop:byId("stop"),export:byId("export")};
+let active=false, completed=0, radius=35, attempts=0, hits=0, misses=0, missesForTarget=0;
+let current=null, timer=null, timeout=null, history=[],lastPos=null,lastReport=null,referenceReport=null;
+let pointerPos=null,pointerType="unknown";
+function observePointer(e){
+ const p={x:e.clientX,y:e.clientY};
+ if(!Number.isFinite(p.x)||!Number.isFinite(p.y))return;
+ if(active&&current&&e.pointerType!=="touch"&&current.lastPointer){
+  current.travel+=Math.hypot(p.x-current.lastPointer.x,p.y-current.lastPointer.y);
+  current.lastPointer=p;
+ }
+ pointerPos=p;pointerType=e.pointerType||pointerType;
+}
+document.addEventListener("pointermove",observePointer,{passive:true});
+document.addEventListener("pointerdown",observePointer,{capture:true,passive:true});
+const fmt=x=>Number.isFinite(x)?x.toFixed(0)+" ms":"—";
+function median(values){if(!values.length)return NaN;const v=[...values].sort((a,b)=>a-b),i=v.length>>1;return v.length%2?v[i]:(v[i-1]+v[i])/2;}
+function info(message){els.event.textContent=message;}
+function stats(){
+ const good=history.filter(x=>x.hit);
+ const fitts=good.filter(x=>x.fitts_valid!==false);
+ els.hits.textContent=String(hits);
+ els.accuracy.textContent=attempts?Math.round(100*hits/attempts)+"%":"—";
+ els.median.textContent=fmt(median(good.map(x=>x.elapsed_ms)));
+ const bits=fitts.map(x=>Math.log2(1+x.cursor_distance_px/x.diameter_px));
+ const seconds=fitts.map(x=>x.elapsed_ms/1000);
+ const throughput=fitts.length>=2?bits.reduce((a,b)=>a+b,0)/seconds.reduce((a,b)=>a+b,0):NaN;
+ els.throughput.textContent=Number.isFinite(throughput)?throughput.toFixed(2)+" b/s":"—";
+ els.round.textContent=completed+" / 20 targets";
+ els.difficulty.textContent="Diameter "+(radius*2)+" px";
+}
+function sessionMetrics(report){
+ const rows=report.records, wins=rows.filter(r=>r.hit);
+ const attempts=wins.length+rows.reduce((n,r)=>n+r.miss_clicks,0);
+ const times=wins.map(r=>r.elapsed_ms), fitts=wins.filter(r=>r.fitts_valid!==false);
+ const bits=fitts.map(r=>Math.log2(1+r.cursor_distance_px/r.diameter_px));
+ const duration=fitts.reduce((s,r)=>s+r.elapsed_ms,0)/1000;
+ return {hits:wins.length,attempts,accuracy:attempts?wins.length/attempts:NaN,
+         median:median(times),throughput:fitts.length>=2&&duration>0?bits.reduce((a,b)=>a+b,0)/duration:NaN};
+}
+function validatedReport(obj){
+ if(!obj||obj.kind!=="FPS Performance Lab offline session"||!Array.isArray(obj.records)||obj.records.length>10000)return false;
+ return obj.records.every(r=>r&&typeof r.hit==="boolean"&&
+   Number.isInteger(r.miss_clicks)&&r.miss_clicks>=0&&r.miss_clicks<=10000&&
+   Number.isFinite(r.diameter_px)&&r.diameter_px>0&&r.diameter_px<1000&&
+   Number.isFinite(r.cursor_distance_px)&&r.cursor_distance_px>=0&&r.cursor_distance_px<1e6&&
+   (r.fitts_valid===undefined||typeof r.fitts_valid==="boolean")&&
+   (!r.hit||(Number.isFinite(r.elapsed_ms)&&r.elapsed_ms>0&&r.elapsed_ms<1e7)));
+}
+function compareSessions(){
+ const el=byId("comparison");
+ if(!referenceReport||!lastReport){el.textContent="Load a prior session and complete a new session to compare.";return;}
+ const old=sessionMetrics(referenceReport),now=sessionMetrics(lastReport);
+ if(old.hits<2||now.hits<2){el.textContent="Insufficient successful hits to compare; complete at least two in each session.";return;}
+ const delta=(a,b,unit,mult=1)=>Number.isFinite(a)&&Number.isFinite(b)?
+   ((a-b)*mult>=0?"+":"")+((a-b)*mult).toFixed(1)+unit:"not comparable";
+ el.textContent="Earlier → current: hit accuracy "+(100*old.accuracy).toFixed(1)+"% → "+(100*now.accuracy).toFixed(1)+"% ("+delta(now.accuracy,old.accuracy," pp",100)+"); "+
+  "median acquisition "+old.median.toFixed(0)+" → "+now.median.toFixed(0)+" ms ("+delta(now.median,old.median," ms")+"); "+
+  "Fitts-style throughput "+((referenceReport.measurement?.cursor_origin==="pointer-at-appearance"&&lastReport.measurement?.cursor_origin==="pointer-at-appearance")?
+  old.throughput.toFixed(2)+" → "+now.throughput.toFixed(2)+" b/s ("+delta(now.throughput,old.throughput," b/s")+")":
+  "not comparable across measurement versions")+". "+
+  "Different targets, starting positions and difficulty make this descriptive, not a controlled skill score.";
+}
+function resetTimers(){clearTimeout(timer);clearTimeout(timeout);timer=timeout=null;}
+function diagnosis(){
+ const successes=history.filter(r=>r.hit);
+ const sorted=successes.map(r=>r.elapsed_ms).sort((a,b)=>a-b);
+ const q=i=>sorted.length?sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*i))]:NaN;
+ const med=median(sorted);
+ const spread=q(.75)-q(.25);
+ if(attempts && hits/attempts < .7)
+  return "Focus: aim precision. Slow down the first movement and finish with a deliberate micro-correction; compare your next session's hit rate against this one.";
+ if(sorted.length>=4 && spread>Math.max(250,med*.55))
+  return "Focus: consistency. Your successful acquisition times vary substantially. Try a repeatable cursor movement and compare the interquartile range across sessions.";
+ if(sorted.length>=4)
+  return "Focus: speed under control. Accuracy is relatively stable; try a shorter acquisition time while preserving accuracy. Compare your own subsequent sessions.";
+ return "Not enough completed hits to diagnose a pattern. Try another session before drawing any performance conclusions.";
+}
+function end(){
+ active=false;resetTimers();target.style.display="none";els.start.disabled=false;els.stop.disabled=true;
+ els.export.disabled=history.length===0;
+ lastReport={version:"0.3",kind:"FPS Performance Lab offline session",created_at:new Date().toISOString(),recommendation:diagnosis(),
+ measurement:{cursor_origin:"pointer-at-appearance",accuracy:"successful clicks / (successful clicks + missed clicks)"},
+ summary:{completed,hits,misses,attempts,accuracy:attempts?hits/attempts:0,
+ median_acquisition_ms:median(history.filter(x=>x.hit).map(x=>x.elapsed_ms))},
+ records:history,limitations:["Mouse acquisition != pure reflex","No physiological or in-game telemetry","Exploratory educational trainer, not validated medical test"]};
+ byId("advice").textContent=lastReport.recommendation;
+ compareSessions();
+ info("Session finished. You may export your recorded trials.");
+}
+function adapt(){
+ const last=history.slice(-5),successful=last.filter(x=>x.hit);
+ const missClicks=last.reduce((sum,r)=>sum+r.miss_clicks,0);
+ const accuracy=successful.length/(last.length+missClicks);
+ const m=median(successful.map(x=>x.elapsed_ms));
+ if(accuracy>=.8 && m<800) radius=Math.max(17,Math.round(radius*.87));
+ else if(accuracy<.6 || (!Number.isNaN(m)&&m>1800)) radius=Math.min(56,Math.round(radius*1.13));
+ info("Difficulty adjusted from the last five targets.");
+}
+function finishTarget(hit){
+ if(!active||!current)return;
+ clearTimeout(timeout);
+ let elapsed=Math.round(performance.now()-current.at);
+ let row={index:completed+1,hit,elapsed_ms:hit?elapsed:null,
+ miss_clicks:missesForTarget,diameter_px:radius*2,
+ cursor_distance_px:current.distance,
+ pointer_path_px:Math.round(current.travel),fitts_valid:current.fittsValid,
+ fitts_difficulty_bits:current.fittsValid?Math.log2(1+current.distance/(radius*2)):null,
+ display_position:{x:Math.round(current.x),y:Math.round(current.y)}};
+ history.push(row);completed++;current=null;target.style.display="none";
+ if(completed%5===0)adapt();
+ stats();
+ if(completed>=20){end();return;}
+ timer=setTimeout(spawn,250+Math.floor(Math.random()*400));
+}
+function spawn(){
+ if(!active)return;
+ const box=arena.getBoundingClientRect(),margin=radius+15;
+ const xmin=margin,xmax=Math.max(xmin,box.width-margin),ymin=margin+30,ymax=Math.max(ymin,box.height-margin);
+ let x,y;
+ for(let k=0;k<20;k++){
+  x=xmin+Math.random()*(xmax-xmin);y=ymin+Math.random()*(ymax-ymin);
+  if(!lastPos||Math.hypot(x-lastPos.x,y-lastPos.y)>=Math.min(120,box.width/4))break;
+ }
+ const valid=pointerPos!==null&&(pointerType==="mouse"||pointerType==="pen");
+ const cursor=valid?{...pointerPos}:null;
+ const d=cursor?Math.hypot(box.left+x-cursor.x,box.top+y-cursor.y):0;
+ target.style.width=radius*2+"px";target.style.height=radius*2+"px";
+ target.style.left=x+"px";target.style.top=y+"px";target.style.display="block";
+ current={x,y,at:performance.now(),distance:d,fittsValid:valid,travel:0,lastPointer:cursor};missesForTarget=0;
+ lastPos={x,y};
+ info("Acquire target "+(completed+1)+".");
+ timeout=setTimeout(()=>{if(active&&current){info("Timeout; next target.");finishTarget(false);}},4500);
+}
+els.start.addEventListener("click",()=>{
+ resetTimers();active=true;completed=hits=misses=attempts=0;radius=35;history=[];current=null;lastPos=null;
+ els.start.disabled=true;els.stop.disabled=false;els.export.disabled=true;byId("advice").textContent="Training... feedback will be ready after you stop.";stats();
+ info("Preparing first target...");timer=setTimeout(spawn,600);
+});
+els.stop.addEventListener("click",()=>{if(active)end();});
+target.addEventListener("pointerdown",e=>{
+ if(!active||!current)return;e.preventDefault();e.stopPropagation();hits++;attempts++;
+ info("Hit.");finishTarget(true);
+});
+arena.addEventListener("pointerdown",e=>{
+ if(!active||!current||e.target===target)return;misses++;attempts++;missesForTarget++;stats();info("Miss. Adjust and try again.");
+});
+byId("referenceImport").addEventListener("change",async event=>{
+ const file=event.target.files&&event.target.files[0];if(!file)return;
+ if(file.size>1000000){byId("referenceStatus").textContent="Report rejected: exceeds 1 MB.";return;}
+ try{
+  const parsed=JSON.parse(await file.text());
+  if(!validatedReport(parsed))throw new Error("incompatible or invalid trial data");
+  referenceReport=parsed;
+  byId("referenceStatus").textContent="Reference loaded: "+parsed.records.length+" targets (stored only in this page).";
+  compareSessions();
+ }catch(error){byId("referenceStatus").textContent="Import failed: "+String(error.message);}
+});
+els.export.addEventListener("click",()=>{
+ if(!lastReport)return;
+ const blob=new Blob([JSON.stringify(lastReport,null,2)],{type:"application/json"});
+ const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="fps_training_session.json";a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+stats();
+})();
+</script>
+</body>
+</html>
